@@ -58,27 +58,14 @@ Segment 15: buckets 15, 31, 47, ...
 `VarHandle`:
 
 ```java
-// Чтение с acquire-семантикой (аналог volatile read)
+// Чтение с acquire-семантикой
 NODE_ARRAY_HANDLE.getAcquire(table, i)
 
-// Запись с release-семантикой (аналог volatile write)
+// Запись с release-семантикой
 NODE_ARRAY_HANDLE.
 
 setRelease(table, i, node)
-
-// Compare-And-Swap
-NODE_ARRAY_HANDLE.
-
-compareAndSet(table, i, expected, update)
 ```
-
-### Подсчёт размера: LongAdder
-
-Вместо одного `AtomicLong` используется массив из 16 `LongAdder` (по одному на сегмент). Каждый `put`/`merge`
-инкрементирует счётчик своего сегмента. `size()` суммирует все счётчики.
-
-`LongAdder` внутри распределяет записи по нескольким ячейкам (striping), что устраняет contention при конкурентных
-инкрементах.
 
 ### Resize (динамическое расширение)
 
@@ -149,10 +136,10 @@ compareAndSet(table, i, expected, update)
 
 ### Анализ результатов
 
-**GET масштабируется линейно у обеих реализаций.** Обе реализации используют lock-free чтение: Custom — через `VarHandle.getAcquire()`, JDK — через `volatile`-чтение. На x86-64 acquire-семантика компилируется в обычный `mov` без memory fence, поэтому overhead от thread-safety при чтении равен нулю. Throughput Custom и JDK практически идентичен и близок к HashMap baseline, что подтверждает отсутствие накладных расходов на синхронизацию при чтении.
+GET масштабируется линейно у обеих реализаций. Обе реализации используют lock-free чтение.
 
-**PUT Custom не масштабируется (16K ops/ms при любом числе потоков).** Причина — грубая гранулярность блокировок: 16 сегментов на всю таблицу. При 8 потоках вероятность коллизии на одном сегменте ~84%, что приводит к постоянному contention на `ReentrantLock`. Кроме того, даже при отсутствии contention каждый lock/unlock — это CAS-операция, вызывающая cache-line bouncing между ядрами.
+PUT Custom не масштабируется (16K ops/ms при любом числе потоков). Причина - грубая гранулярность блокировок: 16 сегментов на всю таблицу. При 8 потоках вероятность коллизии на одном сегменте велики.
 
-**PUT JDK масштабируется линейно (12K -> 80K).** JDK ConcurrentHashMap (Java 8+) использует lock-per-bucket: `synchronized` на первой ноде бакета. Это даёт ~1M независимых "локов" вместо 16, практически исключая contention. Для пустых бакетов JDK использует CAS без блокировки вовсе. Lightweight locking в JVM (biased locking, thin locks) минимизирует overhead в uncontended случае.
+PUT JDK масштабируется линейно (12K -> 80K). JDK ConcurrentHashMap (Java 8+) использует lock-per-bucket: `synchronized` на первой ноде бакета. Для пустых бакетов JDK использует CAS без блокировки вовсе.
 
-**Custom быстрее JDK при 1 потоке на put (16K vs 12K).** В однопоточном режиме `ReentrantLock` без contention дешевле, чем более сложная логика JDK CHM (CAS + fallback на `synchronized` + TreeBin поддержка). Преимущество исчезает при добавлении потоков, где fine-grained подход JDK выигрывает.
+Custom быстрее JDK при 1 потоке на put (16K vs 12K).

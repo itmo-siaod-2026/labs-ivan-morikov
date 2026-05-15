@@ -255,10 +255,6 @@ public class ConcurrentHashMap<K, V> implements Iterable<Map.Entry<K, V>> {
         return (Node<K,V>) NODE_ARRAY_HANDLE.getAcquire(table, i);
     }
 
-    private static <K,V> boolean casTabAt(final Node<K, V>[] table, final int i, final Node<K, V> expected, final Node<K, V> update) {
-        return NODE_ARRAY_HANDLE.compareAndSet(table, i, expected, update);
-    }
-
     private static <K,V> void setTabAt(final Node<K, V>[] table, final int i, final Node<K, V> value) {
         NODE_ARRAY_HANDLE.setRelease(table, i, value);
     }
